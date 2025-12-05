@@ -85,8 +85,10 @@ export default function DashboardPage() {
               <span className="font-semibold">Status:</span> {response.status}
             </div>
             <div>
-              <span className="font-semibold">Message:</span>{" "}
-              {response.message}
+              <span className="font-semibold">Message:</span> {response.message}
+            </div>
+            <div>
+              <span className="font-semibold">Model:</span> {response.model}
             </div>
             <div>
               <span className="font-semibold">Prompt sent:</span>{" "}
@@ -97,10 +99,26 @@ export default function DashboardPage() {
               {response.trust_score}
             </div>
             <div>
+              <span className="font-semibold">Risk level:</span>{" "}
+              {response.risk_level}
+            </div>
+            <div>
+              <span className="font-semibold">Risk flags:</span>{" "}
+              {response.risk_flags && response.risk_flags.length > 0
+                ? response.risk_flags.join(", ")
+                : "None"}
+            </div>
+            <div>
               <span className="font-semibold">Response:</span>
               <pre className="mt-1 whitespace-pre-wrap">
                 {response.response}
               </pre>
+            </div>
+            <div>
+              <span className="font-semibold">Explainability:</span>
+              <p className="mt-1 whitespace-pre-wrap">
+                {response.explainability}
+              </p>
             </div>
           </div>
         )}

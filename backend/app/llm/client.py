@@ -1,43 +1,53 @@
 import os
-from typing import Optional
+from typing import Optional, TypedDict
 
 from dotenv import load_dotenv
 from groq import Groq
 
 from .scrubber import scrub_text
 
-# Load .env file so GROQ_API_KEY is available
 load_dotenv()
+
+
+class LLMResult(TypedDict):
+    text: str
+    model: str
+    error: Optional[str]
+
 
 GROQ_API_KEY: Optional[str] = os.getenv("GROQ_API_KEY")
 
 if not GROQ_API_KEY:
-    # We don't crash here -> placeholder mode if key not set
     print("WARNING: GROQ_API_KEY not set. safe_generate() will return placeholder responses.")
-    client = None
+    client: Optional[Groq] = None
 else:
     client = Groq(api_key=GROQ_API_KEY)
 
 
-def safe_generate(prompt: str) -> str:
+def safe_generate(prompt: str) -> LLMResult:
     """
     Security-aware wrapper around the LLM.
-    - Scrubs sensitive data
-    - Calls Groq Llama 3 if key is available
-    - Falls back to placeholder if something fails
+    Returns:
+        {
+          "text": <model output or fallback>,
+          "model": <model name or "placeholder">,
+          "error": <error string or None>
+        }
     """
 
-    # 1) Scrub sensitive data first
     safe_prompt = scrub_text(prompt or "")
 
-    # 2) If no client (no key), return placeholder
+    # No client => placeholder mode
     if client is None:
-        return f"(Placeholder LLM response for safe prompt: {safe_prompt})"
+        return {
+            "text": f"(Placeholder LLM response for safe prompt: {safe_prompt})",
+            "model": "placeholder",
+            "error": "GROQ_API_KEY not set",
+        }
 
     try:
-        # 3) Call Groq's Llama 3 model
         response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",  # or "llama3-8b-8192" for cheaper
+            model="llama-3.1-8b-instant",
             messages=[
                 {
                     "role": "user",
@@ -48,10 +58,17 @@ def safe_generate(prompt: str) -> str:
             max_tokens=256,
         )
 
-        content = response.choices[0].message.content
-        return content
+        text = response.choices[0].message.content or ""
+        return {
+            "text": text,
+            "model": "llama-3.1-8b-instant",
+            "error": None,
+        }
 
     except Exception as e:
-        # 4) Fail safe – never crash the app, just log and fallback
         print(f"[safe_generate] Error calling Groq: {e}")
-        return f"(Error calling LLM, fallback response for safe prompt: {safe_prompt})"
+        return {
+            "text": f"(Error calling LLM, fallback response for safe prompt: {safe_prompt})",
+            "model": "llama-3.1-8b-instant",
+            "error": str(e),
+        }
