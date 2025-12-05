@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from .routes.agent import router as agent_router
 from .routes.policy import router as policy_router
@@ -9,7 +10,20 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Include routes
+# Allow frontend running on localhost:3000 (Next.js)
+origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(agent_router, prefix="/agent", tags=["Agent"])
 app.include_router(policy_router, prefix="/policy", tags=["Policy"])
 app.include_router(action_router, prefix="/action", tags=["Action"])

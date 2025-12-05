@@ -37,7 +37,7 @@ def safe_generate(prompt: str) -> str:
     try:
         # 3) Call Groq's Llama 3 model
         response = client.chat.completions.create(
-            model="llama3-70b-8192",  # or "llama3-8b-8192" for cheaper
+            model="llama-3.1-8b-instant",  # or "llama3-8b-8192" for cheaper
             messages=[
                 {
                     "role": "user",
@@ -45,7 +45,7 @@ def safe_generate(prompt: str) -> str:
                 }
             ],
             temperature=0.3,
-            max_tokens=512,
+            max_tokens=256,
         )
 
         content = response.choices[0].message.content
