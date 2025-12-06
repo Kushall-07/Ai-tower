@@ -51,6 +51,10 @@ export default function DashboardPage() {
     payload: '{"to": "admin@example.com", "subject": "Test"}'
   });
 
+  // Approvals state
+  const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
+  const [approvalsLoading, setApprovalsLoading] = useState(false);
+
   const runAgent = async () => {
     setLoading(true);
     setError(null);

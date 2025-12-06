@@ -28,13 +28,13 @@ class ApprovalResponse(BaseModel):
         return cls(
             id=approval.id,
             created_at=approval.created_at,
-            updated_at=getattr(approval, "updated_at", None),
+            updated_at=approval.decided_at,  # Map decided_at to updated_at in response
             agent_run_id=approval.agent_run_id,
             status=approval.status,
             risk_level=getattr(approval, "risk_level", None),
             policy_decision=getattr(approval, "policy_decision", None),
-            reviewer=getattr(approval, "reviewer", None),
-            notes=getattr(approval, "notes", None),
+            reviewer=approval.decided_by,  # Map decided_by to reviewer in response
+            notes=approval.decision_reason,  # Map decision_reason to notes in response
             prompt=prompt,
         )
 
@@ -117,12 +117,11 @@ def approve(
     approval = _get_approval_or_404(approval_id, session)
 
     approval.status = "approved"
-    if hasattr(approval, "updated_at"):
-        approval.updated_at = datetime.utcnow()
-    if payload.reviewer is not None and hasattr(approval, "reviewer"):
-        approval.reviewer = payload.reviewer
-    if payload.notes is not None and hasattr(approval, "notes"):
-        approval.notes = payload.notes
+    approval.decided_at = datetime.utcnow()
+    if payload.reviewer is not None:
+        approval.decided_by = payload.reviewer
+    if payload.notes is not None:
+        approval.decision_reason = payload.notes
 
     session.add(approval)
     session.commit()
@@ -144,12 +143,11 @@ def reject(
     approval = _get_approval_or_404(approval_id, session)
 
     approval.status = "rejected"
-    if hasattr(approval, "updated_at"):
-        approval.updated_at = datetime.utcnow()
-    if payload.reviewer is not None and hasattr(approval, "reviewer"):
-        approval.reviewer = payload.reviewer
-    if payload.notes is not None and hasattr(approval, "notes"):
-        approval.notes = payload.notes
+    approval.decided_at = datetime.utcnow()
+    if payload.reviewer is not None:
+        approval.decided_by = payload.reviewer
+    if payload.notes is not None:
+        approval.decision_reason = payload.notes
 
     session.add(approval)
     session.commit()
