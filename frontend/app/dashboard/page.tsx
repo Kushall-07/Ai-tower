@@ -2,7 +2,19 @@
 
 import { useEffect, useState } from "react";
 
-type View = "agent" | "logs" | "actions";
+type View = "agent" | "logs" | "actions" | "approvals";
+
+type ApprovalItem = {
+  id: number;
+  created_at: string;
+  agent_run_id: number;
+  status: string;
+  risk_level?: string | null;
+  policy_decision?: string | null;
+  reviewer?: string | null;
+  notes?: string | null;
+  prompt?: string | null;
+};
 
 interface AgentRunLog {
   id: number;
@@ -177,6 +189,75 @@ export default function DashboardPage() {
   useEffect(() => {
     if (activeView === "actions") {
       void fetchActions();
+    }
+  }, [activeView]);
+
+  // Approvals handlers
+  const fetchApprovals = async () => {
+    try {
+      setApprovalsLoading(true);
+      const res = await fetch("http://127.0.0.1:8000/approvals/pending");
+      if (!res.ok) {
+        console.error("Failed to fetch approvals, status:", res.status);
+        setApprovals([]);
+        return;
+      }
+      const data: ApprovalItem[] = await res.json();
+      setApprovals(data);
+    } catch (err) {
+      console.error("Error fetching approvals:", err);
+      setApprovals([]);
+    } finally {
+      setApprovalsLoading(false);
+    }
+  };
+
+  const handleApprove = async (id: number) => {
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/approvals/${id}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reviewer: "admin",  // later tie this to logged-in user
+          notes: "",
+        }),
+      });
+      if (!res.ok) {
+        alert("Failed to approve");
+        return;
+      }
+      await fetchApprovals();
+      // After approval, you might also want to refresh actions:
+      // fetchActions();
+    } catch (err) {
+      alert("Error: " + err);
+    }
+  };
+
+  const handleReject = async (id: number) => {
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/approvals/${id}/reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reviewer: "admin",
+          notes: "",
+        }),
+      });
+      if (!res.ok) {
+        alert("Failed to reject");
+        return;
+      }
+      await fetchApprovals();
+    } catch (err) {
+      alert("Error: " + err);
+    }
+  };
+
+  // Automatically load approvals when switching to Approvals view
+  useEffect(() => {
+    if (activeView === "approvals") {
+      fetchApprovals();
     }
   }, [activeView]);
 
@@ -454,7 +535,7 @@ export default function DashboardPage() {
                     </span>
                   </td>
                   <td className="px-6 py-4 text-sm space-x-2">
-                    {action.status === "simulated" && (
+                    {(action.status === "simulated" || action.status === "pending") && (
                       <button
                         onClick={() => handleExecuteAction(action.id)}
                         className="px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700"
@@ -526,6 +607,16 @@ export default function DashboardPage() {
           >
             Actions
           </button>
+          <button
+            onClick={() => setActiveView("approvals")}
+            className={`block w-full text-left px-3 py-2 rounded-md ${
+              activeView === "approvals"
+                ? "bg-emerald-500 text-black font-semibold"
+                : "text-slate-300 hover:bg-slate-800"
+            }`}
+          >
+            Approvals
+          </button>
         </nav>
       </aside>
 
@@ -534,6 +625,124 @@ export default function DashboardPage() {
         {activeView === "agent" && renderAgentView()}
         {activeView === "logs" && renderLogsView()}
         {activeView === "actions" && renderActionsView()}
+        {activeView === "approvals" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold text-slate-100">Approvals</h2>
+              <button
+                onClick={fetchApprovals}
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+              >
+                Refresh
+              </button>
+            </div>
+
+            <div className="bg-slate-900 rounded-lg shadow overflow-hidden">
+              <table className="min-w-full">
+                <thead className="bg-slate-800">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase">
+                      Time
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase">
+                      Run ID
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase">
+                      Prompt
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase">
+                      Risk
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase">
+                      Policy
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase">
+                      Status
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-700">
+                  {approvalsLoading && (
+                    <tr>
+                      <td
+                        colSpan={7}
+                        className="px-6 py-4 text-center text-sm text-slate-400"
+                      >
+                        Loading approvals...
+                      </td>
+                    </tr>
+                  )}
+
+                  {!approvalsLoading && approvals.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={7}
+                        className="px-6 py-4 text-center text-sm text-slate-400"
+                      >
+                        No pending approvals. Risky runs will appear here.
+                      </td>
+                    </tr>
+                  )}
+
+                  {!approvalsLoading &&
+                    approvals.map((a) => (
+                      <tr key={a.id}>
+                        <td className="px-6 py-4 text-sm text-slate-300">
+                          {new Date(a.created_at).toLocaleString()}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-300">
+                          {a.agent_run_id}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-300 max-w-xs truncate">
+                          {a.prompt}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-300">
+                          {a.risk_level || "-"}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-300">
+                          {a.policy_decision || "-"}
+                        </td>
+                        <td className="px-6 py-4 text-sm">
+                          <span
+                            className={`px-2 py-1 rounded text-xs font-medium ${
+                              a.status === "approved"
+                                ? "bg-green-100 text-green-800"
+                                : a.status === "rejected"
+                                ? "bg-red-100 text-red-800"
+                                : "bg-yellow-100 text-yellow-800"
+                            }`}
+                          >
+                            {a.status}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-sm space-x-2">
+                          {a.status === "pending" && (
+                            <>
+                              <button
+                                onClick={() => handleApprove(a.id)}
+                                className="px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700"
+                              >
+                                Approve
+                              </button>
+                              <button
+                                onClick={() => handleReject(a.id)}
+                                className="px-3 py-1 bg-red-600 text-white rounded text-xs hover:bg-red-700"
+                              >
+                                Reject
+                              </button>
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </section>
     </main>
   );

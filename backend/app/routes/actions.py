@@ -6,7 +6,7 @@ from datetime import datetime
 import json
 
 from app.db.database import get_session
-from app.db.models import Action, AgentRun
+from app.db.models import Action, AgentRun, Approval
 
 router = APIRouter(prefix="/actions", tags=["actions"])
 
@@ -127,6 +127,21 @@ def execute_action(
 
     if action.status == "cancelled":
         raise HTTPException(status_code=400, detail="Action is cancelled")
+
+    # Check approvals for this agent run
+    stmt = (
+        select(Approval)
+        .where(Approval.agent_run_id == action.agent_run_id)
+        .order_by(Approval.created_at.desc())
+    )
+    approval = session.exec(stmt).first()
+
+    if approval and approval.status != "approved":
+        # approval exists but is not yet approved
+        raise HTTPException(
+            status_code=403,
+            detail="Action requires approval before execution",
+        )
 
     result = {
         "success": True,

@@ -5,7 +5,7 @@ import json
 from sqlmodel import Session
 
 from app.db.database import get_session
-from app.db.models import AgentRun, Approval
+from app.db.models import AgentRun, Approval, Action
 from app.llm.client import safe_generate
 from app.trust.evaluator import evaluate_trust_and_risk
 
@@ -53,6 +53,7 @@ def run_agent(req: AgentRequest, session: Session = Depends(get_session)):
     llm_text = llm_result.get("text")
     llm_error = llm_result.get("error")
     model_name = llm_result.get("model", "unknown")
+    suggested_actions = llm_result.get("actions", []) or []
 
     # 2) Evaluate trust & risk
     tr = evaluate_trust_and_risk(prompt, llm_text, llm_error)
@@ -107,8 +108,12 @@ def run_agent(req: AgentRequest, session: Session = Depends(get_session)):
     session.commit()
     session.refresh(run)
 
-    # 5) Create Approval if needed
-    if policy_decision == "needs_approval":
+    # 5) If risky or blocked, create an Approval entry
+    needs_approval = (
+        risk_level in ("medium", "high") or policy_decision in ("block", "needs_approval")
+    )
+
+    if needs_approval:
         approval = Approval(
             agent_run_id=run.id,
             status="pending",
@@ -116,7 +121,28 @@ def run_agent(req: AgentRequest, session: Session = Depends(get_session)):
         session.add(approval)
         session.commit()
 
-    # 6) Build response
+    # 6) Store any suggested actions from the LLM
+    #    These are "pending" by default so a human / policy layer can approve or simulate.
+    for act in suggested_actions:
+        if not isinstance(act, dict):
+            continue
+        a_type = act.get("type") or "other"
+        payload = act.get("payload") or {}
+        if not isinstance(payload, dict):
+            payload = {}
+
+        action = Action(
+            agent_run_id=run.id,
+            type=a_type,
+            payload_json=json.dumps(payload),
+            status="pending",  # can be 'pending' until sandbox / approval
+        )
+        session.add(action)
+
+    if suggested_actions:
+        session.commit()
+
+    # 7) Build response
     return AgentResponse(
         status="ok",
         message="Agent runner live!",

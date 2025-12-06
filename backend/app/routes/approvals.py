@@ -1,108 +1,159 @@
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from ..db.database import engine
-from ..db.models import AgentRun, Approval
+from app.db.database import get_session
+from app.db.models import Approval, AgentRun
 
-router = APIRouter()
+router = APIRouter(prefix="/approvals", tags=["approvals"])
 
 
-class PendingApproval(BaseModel):
-    approval_id: int
-    run_id: int
+class ApprovalResponse(BaseModel):
+    id: int
     created_at: datetime
-    prompt: str
-    response_preview: str
-    trust_score: float
-    risk_level: str
-    policy_decision: str
+    updated_at: Optional[datetime]
+    agent_run_id: int
+    status: str
+    risk_level: Optional[str] = None
+    policy_decision: Optional[str] = None
+    reviewer: Optional[str] = None
+    notes: Optional[str] = None
+    prompt: Optional[str] = None
 
-
-class ApprovalAction(BaseModel):
-    reason: Optional[str] = None
-    decided_by: Optional[str] = "human-reviewer"
-
-
-@router.get("/pending", response_model=List[PendingApproval])
-def get_pending_approvals(limit: int = 20):
-    """
-    Return pending approvals with basic info from the related AgentRun.
-    """
-    with Session(engine) as session:
-        stmt = (
-            select(Approval)
-            .where(Approval.status == "pending")
-            .order_by(Approval.created_at.desc())
-            .limit(limit)
+    @classmethod
+    def from_model(cls, approval: Approval, prompt: Optional[str] = None):
+        return cls(
+            id=approval.id,
+            created_at=approval.created_at,
+            updated_at=getattr(approval, "updated_at", None),
+            agent_run_id=approval.agent_run_id,
+            status=approval.status,
+            risk_level=getattr(approval, "risk_level", None),
+            policy_decision=getattr(approval, "policy_decision", None),
+            reviewer=getattr(approval, "reviewer", None),
+            notes=getattr(approval, "notes", None),
+            prompt=prompt,
         )
-        approvals = session.exec(stmt).all()
-
-        results: List[PendingApproval] = []
-
-        for ap in approvals:
-            run = session.get(AgentRun, ap.agent_run_id)
-            if not run:
-                continue
-
-            results.append(
-                PendingApproval(
-                    approval_id=ap.id,
-                    run_id=run.id,
-                    created_at=ap.created_at,
-                    prompt=run.prompt,
-                    response_preview=(run.response[:120] + "...")
-                    if len(run.response) > 120
-                    else run.response,
-                    trust_score=run.trust_score,
-                    risk_level=run.risk_level,
-                    policy_decision=run.policy_decision,
-                )
-            )
-
-        return results
 
 
-@router.post("/{approval_id}/approve")
-def approve(approval_id: int, action: ApprovalAction):
-    with Session(engine) as session:
-        ap = session.get(Approval, approval_id)
-        if not ap:
-            raise HTTPException(status_code=404, detail="Approval not found")
-
-        if ap.status != "pending":
-            raise HTTPException(status_code=400, detail="Approval already decided")
-
-        ap.status = "approved"
-        ap.decided_at = datetime.utcnow()
-        ap.decided_by = action.decided_by
-        ap.decision_reason = action.reason
-
-        session.add(ap)
-        session.commit()
-
-        return {"status": "ok", "message": "Approval marked as approved."}
+class ApprovalUpdateRequest(BaseModel):
+    reviewer: Optional[str] = None
+    notes: Optional[str] = None
 
 
-@router.post("/{approval_id}/reject")
-def reject(approval_id: int, action: ApprovalAction):
-    with Session(engine) as session:
-        ap = session.get(Approval, approval_id)
-        if not ap:
-            raise HTTPException(status_code=404, detail="Approval not found")
+@router.get("/pending", response_model=List[ApprovalResponse])
+def get_pending_approvals(
+    session: Session = Depends(get_session),
+    limit: int = 100,
+):
+    """
+    List approvals that are currently pending.
+    """
+    stmt = (
+        select(Approval)
+        .where(Approval.status == "pending")
+        .order_by(Approval.created_at.desc())
+        .limit(limit)
+    )
+    approvals = session.exec(stmt).all()
 
-        if ap.status != "pending":
-            raise HTTPException(status_code=400, detail="Approval already decided")
+    # join with AgentRun to get prompt
+    responses: List[ApprovalResponse] = []
+    for a in approvals:
+        run = session.get(AgentRun, a.agent_run_id)
+        responses.append(
+            ApprovalResponse.from_model(a, prompt=run.prompt if run else None)
+        )
 
-        ap.status = "rejected"
-        ap.decided_at = datetime.utcnow()
-        ap.decided_by = action.decided_by
-        ap.decision_reason = action.reason
+    return responses
 
-        session.add(ap)
-        session.commit()
 
-        return {"status": "ok", "message": "Approval marked as rejected."}
+@router.get("/all", response_model=List[ApprovalResponse])
+def get_all_approvals(
+    status: Optional[str] = None,
+    limit: int = 200,
+    session: Session = Depends(get_session),
+):
+    """
+    List approvals, optionally filtered by status.
+    """
+    stmt = select(Approval)
+
+    if status:
+        stmt = stmt.where(Approval.status == status)
+
+    stmt = stmt.order_by(Approval.created_at.desc()).limit(limit)
+    approvals = session.exec(stmt).all()
+
+    responses: List[ApprovalResponse] = []
+    for a in approvals:
+        run = session.get(AgentRun, a.agent_run_id)
+        responses.append(
+            ApprovalResponse.from_model(a, prompt=run.prompt if run else None)
+        )
+
+    return responses
+
+
+def _get_approval_or_404(approval_id: int, session: Session) -> Approval:
+    approval = session.get(Approval, approval_id)
+    if not approval:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    return approval
+
+
+@router.post("/{approval_id}/approve", response_model=ApprovalResponse)
+def approve(
+    approval_id: int,
+    payload: ApprovalUpdateRequest,
+    session: Session = Depends(get_session),
+):
+    """
+    Mark an approval as approved.
+    """
+    approval = _get_approval_or_404(approval_id, session)
+
+    approval.status = "approved"
+    if hasattr(approval, "updated_at"):
+        approval.updated_at = datetime.utcnow()
+    if payload.reviewer is not None and hasattr(approval, "reviewer"):
+        approval.reviewer = payload.reviewer
+    if payload.notes is not None and hasattr(approval, "notes"):
+        approval.notes = payload.notes
+
+    session.add(approval)
+    session.commit()
+    session.refresh(approval)
+
+    run = session.get(AgentRun, approval.agent_run_id)
+    return ApprovalResponse.from_model(approval, prompt=run.prompt if run else None)
+
+
+@router.post("/{approval_id}/reject", response_model=ApprovalResponse)
+def reject(
+    approval_id: int,
+    payload: ApprovalUpdateRequest,
+    session: Session = Depends(get_session),
+):
+    """
+    Mark an approval as rejected.
+    """
+    approval = _get_approval_or_404(approval_id, session)
+
+    approval.status = "rejected"
+    if hasattr(approval, "updated_at"):
+        approval.updated_at = datetime.utcnow()
+    if payload.reviewer is not None and hasattr(approval, "reviewer"):
+        approval.reviewer = payload.reviewer
+    if payload.notes is not None and hasattr(approval, "notes"):
+        approval.notes = payload.notes
+
+    session.add(approval)
+    session.commit()
+    session.refresh(approval)
+
+    run = session.get(AgentRun, approval.agent_run_id)
+    return ApprovalResponse.from_model(approval, prompt=run.prompt if run else None)
