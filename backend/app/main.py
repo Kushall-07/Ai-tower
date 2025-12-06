@@ -4,8 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.db.database import init_db
 from app.routes.agent import router as agent_router
 from app.routes.logs import router as logs_router
-from app.routes.approvals import router as approvals_router
 from app.routes.actions import router as actions_router
+from app.routes.approvals import router as approvals_router
+from app.routes.data import router as data_router
 
 
 app = FastAPI(title="AI Control Tower")
@@ -35,8 +36,9 @@ def on_startup():
 # ROUTERS
 app.include_router(agent_router)
 app.include_router(logs_router)
-app.include_router(approvals_router)
 app.include_router(actions_router)
+app.include_router(approvals_router)
+app.include_router(data_router)
 
 
 @app.get("/")

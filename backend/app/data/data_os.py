@@ -1,67 +1,75 @@
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
-from sqlmodel import Session, select
+from app.data.connectors.csv_connector import (
+    list_datasets,
+    preview_dataset,
+    filter_dataset,
+)
 
-from ..db.database import engine
-from ..db.models import AgentRun
-from .connectors.csv_connector import load_csv
+
+class DataOSError(Exception):
+    pass
 
 
-# ---- LOGS (AgentRun) helpers ----
-
-def get_logs(
-    limit: int = 100,
-    risk_level: Optional[str] = None,
-    policy_decision: Optional[str] = None,
-) -> List[AgentRun]:
+def get_available_sources() -> List[str]:
     """
-    Query AgentRun logs with optional filters.
-    This is the core of the Control Tower Data OS for now.
+    For now we only support 'csv', but this makes it extensible.
     """
-    with Session(engine) as session:
-        stmt = select(AgentRun).order_by(AgentRun.created_at.desc()).limit(limit)
-
-        # Simple filters
-        if risk_level:
-            stmt = stmt.where(AgentRun.risk_level == risk_level)
-        if policy_decision:
-            stmt = stmt.where(AgentRun.policy_decision == policy_decision)
-
-        results = session.exec(stmt).all()
-        return list(results)
+    return ["csv"]
 
 
-def get_logs_stats() -> Dict[str, Any]:
+def list_source_datasets(source: str) -> List[str]:
     """
-    Compute basic analytics from AgentRun logs:
-      - total_runs
-      - by_risk_level
-      - by_policy_decision
+    List datasets for a given source.
+    For v1, only 'csv' is implemented.
     """
-    with Session(engine) as session:
-        stmt = select(AgentRun)
-        runs = session.exec(stmt).all()
+    if source != "csv":
+        raise DataOSError(f"Unsupported source: {source}")
+    return list_datasets()
 
-    total = len(runs)
-    by_risk: Dict[str, int] = {}
-    by_policy: Dict[str, int] = {}
 
-    for r in runs:
-        by_risk[r.risk_level] = by_risk.get(r.risk_level, 0) + 1
-        by_policy[r.policy_decision] = by_policy.get(r.policy_decision, 0) + 1
+def run_query(
+    source: str,
+    dataset: str,
+    operation: str,
+    filters: Optional[Dict[str, Any]] = None,
+    limit: int = 50,
+) -> Dict[str, Any]:
+    """
+    Main Data OS entry point.
+
+    Parameters:
+      - source: "csv" (for now)
+      - dataset: logical dataset name, e.g. "customers"
+      - operation: "preview" | "filter"
+      - filters: dict of equality filters (for 'filter')
+      - limit: number of rows to return
+
+    Returns:
+      {
+        "source": "csv",
+        "dataset": "customers",
+        "operation": "filter",
+        "limit": 50,
+        "rows": [...],
+        "row_count": <int>
+      }
+    """
+    if source != "csv":
+        raise DataOSError(f"Unsupported source: {source}")
+
+    if operation == "preview":
+        rows = preview_dataset(dataset, limit=limit)
+    elif operation == "filter":
+        rows = filter_dataset(dataset, filters=filters or {}, limit=limit)
+    else:
+        raise DataOSError(f"Unsupported operation: {operation}")
 
     return {
-        "total_runs": total,
-        "by_risk_level": by_risk,
-        "by_policy_decision": by_policy,
+        "source": source,
+        "dataset": dataset,
+        "operation": operation,
+        "limit": limit,
+        "row_count": len(rows),
+        "rows": rows,
     }
-
-
-# ---- CSV / external data helpers (for future expansion) ----
-
-def load_csv_dataset(path: str) -> List[Dict[str, Any]]:
-    """
-    Wrapper around the CSV connector.
-    Later you can add caching, schema, etc.
-    """
-    return load_csv(path)
