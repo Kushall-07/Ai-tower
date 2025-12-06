@@ -1,19 +1,17 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .db.database import init_db
-from .routes.agent import router as agent_router
-from .routes.policy import router as policy_router
-from .routes.action import router as action_router
-from .routes.logs import router as logs_router
-from .routes.approvals import router as approvals_router
+from app.db.database import init_db
+from app.routes.agent import router as agent_router
+from app.routes.logs import router as logs_router
+from app.routes.approvals import router as approvals_router
+from app.routes.actions import router as actions_router
 
-app = FastAPI(
-    title="AI Control Tower Backend",
-    version="1.0.0",
-)
 
-# Allow frontend running on localhost:3000 (Next.js)
+app = FastAPI(title="AI Control Tower")
+
+
+# CORS CONFIG
 origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -30,16 +28,17 @@ app.add_middleware(
 
 @app.on_event("startup")
 def on_startup():
+    # Create tables if not exist
     init_db()
 
 
-app.include_router(agent_router, prefix="/agent", tags=["Agent"])
-app.include_router(policy_router, prefix="/policy", tags=["Policy"])
-app.include_router(action_router, prefix="/action", tags=["Action"])
-app.include_router(logs_router, prefix="/logs", tags=["Logs"])
-app.include_router(approvals_router, prefix="/approvals", tags=["Approvals"])
+# ROUTERS
+app.include_router(agent_router)
+app.include_router(logs_router)
+app.include_router(approvals_router)
+app.include_router(actions_router)
 
 
 @app.get("/")
 def root():
-    return {"message": "AI Control Tower Backend Running!"}
+    return {"status": "ok", "service": "ai-control-tower-backend"}

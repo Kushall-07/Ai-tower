@@ -37,3 +37,16 @@ class Approval(SQLModel, table=True):
     decided_at: Optional[datetime] = None
     decided_by: Optional[str] = None
     decision_reason: Optional[str] = None
+
+
+class Action(SQLModel, table=True):
+    __tablename__ = "actions"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    agent_run_id: int = Field(foreign_key="agentrun.id")
+    type: str  # e.g., "email_suggestion", "database_query", "api_call", etc.
+    payload_json: str  # JSON string of the action details
+    status: str = Field(default="pending")  # "pending", "simulated", "executed", "cancelled"
+    executed_at: Optional[datetime] = None
+    execution_result_json: Optional[str] = None  # Store results after execution
