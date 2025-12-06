@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-type View = "agent" | "logs" | "actions" | "approvals";
+type View = "agent" | "logs" | "actions" | "approvals" | "data";
 
 type ApprovalItem = {
   id: number;
@@ -54,6 +54,17 @@ export default function DashboardPage() {
   // Approvals state
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [approvalsLoading, setApprovalsLoading] = useState(false);
+
+  // Data OS state
+  type DataRow = { [key: string]: any };
+  const [dataSource] = useState("csv"); // only csv for now
+  const [datasets, setDatasets] = useState<string[]>([]);
+  const [selectedDataset, setSelectedDataset] = useState<string>("");
+  const [dataRows, setDataRows] = useState<DataRow[]>([]);
+  const [dataLoading, setDataLoading] = useState(false);
+  const [filterField, setFilterField] = useState("");
+  const [filterValue, setFilterValue] = useState("");
+  const [dataMessage, setDataMessage] = useState<string>("");
 
   const runAgent = async () => {
     setLoading(true);
@@ -262,6 +273,109 @@ export default function DashboardPage() {
   useEffect(() => {
     if (activeView === "approvals") {
       fetchApprovals();
+    }
+  }, [activeView]);
+
+  // Data OS handlers
+  const fetchDatasets = async () => {
+    try {
+      setDataMessage("");
+      const res = await fetch(
+        `http://127.0.0.1:8000/data/datasets?source=${dataSource}`
+      );
+      if (!res.ok) {
+        setDataMessage(`Failed to load datasets: ${res.status}`);
+        setDatasets([]);
+        return;
+      }
+      const data = await res.json();
+      setDatasets(data.datasets || []);
+      if (data.datasets && data.datasets.length > 0 && !selectedDataset) {
+        setSelectedDataset(data.datasets[0]);
+      }
+    } catch (err) {
+      setDataMessage("Error fetching datasets");
+      console.error(err);
+    }
+  };
+
+  const previewData = async () => {
+    if (!selectedDataset) {
+      setDataMessage("Select a dataset first");
+      return;
+    }
+    try {
+      setDataLoading(true);
+      setDataMessage("");
+      const res = await fetch("http://127.0.0.1:8000/data/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: dataSource,
+          dataset: selectedDataset,
+          operation: "preview",
+          limit: 50,
+        }),
+      });
+      if (!res.ok) {
+        setDataMessage(`Preview failed: ${res.status}`);
+        setDataRows([]);
+        return;
+      }
+      const json = await res.json();
+      setDataRows(json.rows || []);
+      setDataMessage(`Loaded ${json.row_count} rows`);
+    } catch (err) {
+      setDataMessage("Error previewing data");
+      console.error(err);
+    } finally {
+      setDataLoading(false);
+    }
+  };
+
+  const filterData = async () => {
+    if (!selectedDataset) {
+      setDataMessage("Select a dataset first");
+      return;
+    }
+    if (!filterField || !filterValue) {
+      setDataMessage("Enter filter field and value");
+      return;
+    }
+    try {
+      setDataLoading(true);
+      setDataMessage("");
+      const res = await fetch("http://127.0.0.1:8000/data/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: dataSource,
+          dataset: selectedDataset,
+          operation: "filter",
+          filters: { [filterField]: filterValue },
+          limit: 50,
+        }),
+      });
+      if (!res.ok) {
+        setDataMessage(`Filter failed: ${res.status}`);
+        setDataRows([]);
+        return;
+      }
+      const json = await res.json();
+      setDataRows(json.rows || []);
+      setDataMessage(`Filtered ${json.row_count} rows`);
+    } catch (err) {
+      setDataMessage("Error filtering data");
+      console.error(err);
+    } finally {
+      setDataLoading(false);
+    }
+  };
+
+  // Automatically load datasets when switching to Data view
+  useEffect(() => {
+    if (activeView === "data") {
+      fetchDatasets();
     }
   }, [activeView]);
 
@@ -621,6 +735,16 @@ export default function DashboardPage() {
           >
             Approvals
           </button>
+          <button
+            onClick={() => setActiveView("data")}
+            className={`block w-full text-left px-3 py-2 rounded-md ${
+              activeView === "data"
+                ? "bg-emerald-500 text-black font-semibold"
+                : "text-slate-300 hover:bg-slate-800"
+            }`}
+          >
+            Data
+          </button>
         </nav>
       </aside>
 
@@ -629,6 +753,156 @@ export default function DashboardPage() {
         {activeView === "agent" && renderAgentView()}
         {activeView === "logs" && renderLogsView()}
         {activeView === "actions" && renderActionsView()}
+        {activeView === "data" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold text-slate-100">Data Explorer</h2>
+              <button
+                onClick={fetchDatasets}
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+              >
+                Reload Datasets
+              </button>
+            </div>
+
+            {/* Controls */}
+            <div className="bg-slate-900 rounded-lg shadow p-6 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-1">
+                    Source
+                  </label>
+                  <input
+                    disabled
+                    className="w-full px-3 py-2 border border-slate-700 bg-slate-800 text-slate-200 rounded"
+                    value={dataSource}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-1">
+                    Dataset
+                  </label>
+                  <select
+                    value={selectedDataset}
+                    onChange={(e) => setSelectedDataset(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-700 bg-slate-800 text-slate-200 rounded"
+                  >
+                    <option value="">Select dataset</option>
+                    {datasets.map((ds) => (
+                      <option key={ds} value={ds}>
+                        {ds}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-1">
+                    Quick Actions
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={previewData}
+                      className="flex-1 px-3 py-2 bg-slate-700 text-white rounded hover:bg-slate-600 text-sm"
+                    >
+                      Preview
+                    </button>
+                    <button
+                      onClick={() => {
+                        setFilterField("");
+                        setFilterValue("");
+                        setDataRows([]);
+                        setDataMessage("Cleared filters and data");
+                      }}
+                      className="flex-1 px-3 py-2 bg-slate-800 text-slate-200 border border-slate-600 rounded text-sm"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Filter inputs */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-1">
+                    Filter field (column)
+                  </label>
+                  <input
+                    value={filterField}
+                    onChange={(e) => setFilterField(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-700 bg-slate-800 text-slate-200 rounded"
+                    placeholder="e.g. city"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-1">
+                    Filter value
+                  </label>
+                  <input
+                    value={filterValue}
+                    onChange={(e) => setFilterValue(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-700 bg-slate-800 text-slate-200 rounded"
+                    placeholder="e.g. Bangalore"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <button
+                    onClick={filterData}
+                    className="w-full px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
+                  >
+                    Apply Filter
+                  </button>
+                </div>
+              </div>
+
+              {dataMessage && (
+                <p className="text-sm text-slate-400 mt-2">{dataMessage}</p>
+              )}
+            </div>
+
+            {/* Data table */}
+            <div className="bg-slate-900 rounded-lg shadow overflow-auto max-h-[450px]">
+              {dataLoading ? (
+                <div className="p-6 text-slate-400 text-sm">Loading data…</div>
+              ) : dataRows.length === 0 ? (
+                <div className="p-6 text-slate-400 text-sm">
+                  No data loaded. Use Preview or Filter to see rows.
+                </div>
+              ) : (
+                <table className="min-w-full text-sm">
+                  <thead className="bg-slate-800 sticky top-0">
+                    <tr>
+                      {Object.keys(dataRows[0]).map((key) => (
+                        <th
+                          key={key}
+                          className="px-4 py-2 text-left text-xs font-medium text-slate-300 uppercase"
+                        >
+                          {key}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800">
+                    {dataRows.map((row, idx) => (
+                      <tr key={idx}>
+                        {Object.keys(dataRows[0]).map((key) => (
+                          <td
+                            key={key}
+                            className="px-4 py-2 text-slate-200 whitespace-nowrap"
+                          >
+                            {String(row[key])}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        )}
         {activeView === "approvals" && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
